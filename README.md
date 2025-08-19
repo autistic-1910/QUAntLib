@@ -205,7 +205,3 @@ black quantlib/
 4. Add tests for new functionality
 5. Ensure all tests pass
 6. Submit a pull request
-
-## License
-
-MIT License
