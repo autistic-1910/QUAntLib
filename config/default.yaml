@@ -1,0 +1,70 @@
+# Default configuration for QuantLib
+
+# Data settings
+data_dir: "./data"
+cache_dir: "./cache"
+log_level: "INFO"
+log_file: null
+
+# Database configuration
+database:
+  type: "sqlite"
+  path: "./data/quantlib.db"
+  # For PostgreSQL:
+  # type: "postgresql"
+  # host: "localhost"
+  # port: 5432
+  # database: "quantlib"
+  # username: "user"
+  # password: "password"
+
+# Risk management settings
+risk:
+  confidence_levels: [0.95, 0.99]
+  var_methods: ["historical", "parametric", "monte_carlo"]
+  monte_carlo_simulations: 10000
+  max_position_size: 0.1  # 10% of portfolio
+  max_sector_exposure: 0.3  # 30% per sector
+
+# Performance analysis settings
+performance:
+  benchmark: "SPY"
+  risk_free_rate: 0.02
+  trading_days_per_year: 252
+  attribution_factors: ["market", "size", "value", "momentum"]
+
+# Backtesting settings
+backtesting:
+  initial_capital: 100000
+  commission: 0.001  # 0.1%
+  slippage: 0.0005   # 0.05%
+  market_impact: 0.0001  # 0.01%
+  
+# Technical analysis settings
+technical:
+  default_periods:
+    short_ma: 10
+    long_ma: 20
+    rsi: 14
+    bollinger: 20
+  
+# API settings
+api:
+  rate_limits:
+    yahoo: 2000  # requests per hour
+    alpha_vantage: 500
+  timeout: 30  # seconds
+
+# Live trading settings
+live_trading:
+  enabled: false
+  paper_trading: true
+  brokers:
+    interactive_brokers:
+      host: "127.0.0.1"
+      port: 7497
+      client_id: 1
+    alpaca:
+      base_url: "https://paper-api.alpaca.markets"
+      api_key: null
+      secret_key: null
