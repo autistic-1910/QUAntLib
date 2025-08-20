@@ -41,10 +41,9 @@ class VaRCalculator:
         """
         # Support both single confidence level and list API
         if confidence_level is not None:
-            percentile = (confidence_level) * 100
-            # Historical VaR is typically the negative percentile of losses; here returns are signed
-            # Tests expect a negative number (loss), so take the percentile of the distribution
-            return float(np.percentile(returns, percentile))
+            # Use left-tail quantile: 1 - confidence
+            tail = 1.0 - confidence_level
+            return float(np.quantile(returns, tail))
 
         confidence_levels = confidence_levels or self.confidence_levels
         
@@ -54,8 +53,9 @@ class VaRCalculator:
         var_results = {}
         
         for confidence in confidence_levels:
-            percentile = (confidence) * 100
-            var_value = np.percentile(returns, percentile)
+            # Use left-tail quantile: 1 - confidence
+            tail = 1.0 - confidence
+            var_value = float(np.quantile(returns, tail))
             var_results[confidence] = var_value
             
         self.logger.info(f"Historical VaR calculated for {len(returns)} observations")
@@ -71,7 +71,7 @@ class VaRCalculator:
         Args:
             returns: Return series
             confidence_levels: List of confidence levels
-            distribution: Distribution assumption ('normal', 't', 'skewed_t')
+            distribution: Distribution assumption ('normal', 't')
             
         Returns:
             If confidence_level is provided, returns a single float VaR value.
@@ -81,21 +81,14 @@ class VaRCalculator:
         if confidence_level is not None:
             mean_return = returns.mean()
             std_return = returns.std()
+            # Use left-tail quantile: 1 - confidence
+            tail = 1.0 - confidence_level
             if distribution == 'normal':
-                z_score = stats.norm.ppf(confidence_level)
-                return float(mean_return + z_score * std_return)
+                z = stats.norm.ppf(tail)  # negative
+                return float(mean_return + z * std_return)
             elif distribution == 't':
                 df, loc, scale = stats.t.fit(returns)
-                t_score = stats.t.ppf(confidence_level, df, loc, scale)
-                return float(t_score)
-            elif distribution == 'skewed_t':
-                try:
-                    params = stats.skewt.fit(returns)
-                    return float(stats.skewt.ppf(confidence_level, *params))
-                except Exception:
-                    self.logger.warning("Skewed-t fitting failed, using normal distribution")
-                    z_score = stats.norm.ppf(confidence_level)
-                    return float(mean_return + z_score * std_return)
+                return float(stats.t.ppf(tail, df, loc, scale))
             else:
                 raise ValueError(f"Unsupported distribution: {distribution}")
 
@@ -107,26 +100,16 @@ class VaRCalculator:
         var_results = {}
         
         for confidence in confidence_levels:
+            # Use left-tail quantile: 1 - confidence
+            tail = 1.0 - confidence
             if distribution == 'normal':
-                z_score = stats.norm.ppf(confidence)
-                var_value = mean_return + z_score * std_return
+                z = stats.norm.ppf(tail)  # negative
+                var_value = mean_return + z * std_return
                 
             elif distribution == 't':
                 # Fit t-distribution
                 df, loc, scale = stats.t.fit(returns)
-                t_score = stats.t.ppf(confidence, df, loc, scale)
-                var_value = t_score
-                
-            elif distribution == 'skewed_t':
-                # Fit skewed t-distribution
-                try:
-                    params = stats.skewt.fit(returns)
-                    var_value = stats.skewt.ppf(confidence, *params)
-                except:
-                    # Fallback to normal distribution
-                    self.logger.warning("Skewed-t fitting failed, using normal distribution")
-                    z_score = stats.norm.ppf(confidence)
-                    var_value = mean_return + z_score * std_return
+                var_value = stats.t.ppf(tail, df, loc, scale)
             else:
                 raise ValueError(f"Unsupported distribution: {distribution}")
                 
@@ -139,15 +122,17 @@ class VaRCalculator:
                        confidence_level: Optional[float] = None,
                        confidence_levels: Optional[List[float]] = None,
                        simulations: int = 10000,
-                       time_horizon: int = 1) -> Union[float, Dict[float, float]]:
+                       time_horizon: float = 1.0,
+                       random_state: Optional[int] = None) -> Union[float, Dict[float, float]]:
         """
         Calculate Monte Carlo Value-at-Risk.
         
         Args:
             returns: Return series
             confidence_levels: List of confidence levels
-            n_simulations: Number of Monte Carlo simulations
+            simulations: Number of Monte Carlo simulations
             time_horizon: Time horizon in periods
+            random_state: Random seed for reproducibility (optional)
             
         Returns:
             If confidence_level is provided, returns a single float VaR value.
@@ -159,8 +144,12 @@ class VaRCalculator:
         std_return = returns.std()
         
         # Generate random scenarios
-        np.random.seed(42)  # For reproducible results
-        random_returns = np.random.normal(
+        if random_state is not None:
+            rng = np.random.default_rng(random_state)
+        else:
+            rng = np.random.default_rng()
+            
+        random_returns = rng.normal(
             mean_return * time_horizon,
             std_return * np.sqrt(time_horizon),
             simulations
@@ -168,13 +157,13 @@ class VaRCalculator:
         
         # Single value API
         if confidence_level is not None:
-            percentile = (confidence_level) * 100
-            return float(np.percentile(random_returns, percentile))
+            tail = 1.0 - confidence_level
+            return float(np.quantile(random_returns, tail))
 
         var_results = {}
         for confidence in confidence_levels:
-            percentile = (confidence) * 100
-            var_value = np.percentile(random_returns, percentile)
+            tail = 1.0 - confidence
+            var_value = float(np.quantile(random_returns, tail))
             var_results[confidence] = var_value
             
         self.logger.info(f"Monte Carlo VaR calculated with {simulations} simulations")
@@ -271,14 +260,14 @@ class RiskMetrics:
         rf_rate = risk_free_rate or self.risk_free_rate
         target = target_return or rf_rate / self.trading_days
         
-        excess_returns = returns - target
-        downside_returns = excess_returns[excess_returns < 0]
+        excess = returns - target
+        down = excess[excess < 0]
         
-        if len(downside_returns) == 0 or downside_returns.std() == 0:
-            return np.inf if excess_returns.mean() > 0 else 0.0
+        if len(down) == 0:
+            return float('inf')
             
-        downside_deviation = downside_returns.std()
-        return excess_returns.mean() / downside_deviation * np.sqrt(self.trading_days)
+        downside_dev = float(np.sqrt((down**2).mean()))  # population semideviation
+        return float(excess.mean() / downside_dev * np.sqrt(self.trading_days))
     
     def calmar_ratio(self, returns: pd.Series) -> float:
         """
@@ -290,6 +279,9 @@ class RiskMetrics:
         Returns:
             Calmar ratio
         """
+        if len(returns) == 0:
+            return np.nan
+            
         annual_return = (1 + returns).prod() ** (self.trading_days / len(returns)) - 1
         max_dd = self.calculate_max_drawdown(returns)['max_drawdown']
         

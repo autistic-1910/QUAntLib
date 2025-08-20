@@ -150,6 +150,14 @@ class SimulatedBroker(ExecutionHandler):
         # Apply slippage and market impact
         fill_price = self._apply_execution_costs(base_price, order, volume)
         
+        # For limit orders, ensure fill price doesn't violate limit
+        if order_type == 'LMT':
+            limit_price = order.price
+            if direction == 'BUY' and fill_price > limit_price:
+                fill_price = limit_price
+            elif direction == 'SELL' and fill_price < limit_price:
+                fill_price = limit_price
+        
         return fill_price
         
     def _apply_execution_costs(self, base_price: float, order: OrderEvent, volume: float) -> float:
@@ -167,13 +175,13 @@ class SimulatedBroker(ExecutionHandler):
         else:
             impact_factor = self.market_impact
             
-        # Apply costs based on direction
+        # Apply costs based on direction - normalize slippage calculation
         if direction == 'BUY':
-            # Buying: slippage and impact increase price
+            # Buying: slippage and impact increase price (adverse for buyer)
             total_cost = abs(slippage_factor) + impact_factor
             fill_price = base_price * (1 + total_cost)
         else:  # SELL
-            # Selling: slippage and impact decrease price
+            # Selling: slippage and impact decrease price (adverse for seller)
             total_cost = abs(slippage_factor) + impact_factor
             fill_price = base_price * (1 - total_cost)
             
@@ -201,10 +209,11 @@ class SimulatedBroker(ExecutionHandler):
             market_data = self.data_handler.get_latest_bar(order.symbol)
             if market_data:
                 market_price = market_data['close']
-                if order.direction == 'BUY':
-                    slippage = (fill.fill_price - market_price) / market_price
-                else:
-                    slippage = (market_price - fill.fill_price) / market_price
+                # Normalize slippage calculation: (fill_price - market_price) / market_price
+                # Positive slippage means worse execution (higher cost for buy, lower price for sell)
+                slippage = (fill.fill_price - market_price) / market_price
+                if order.direction == 'SELL':
+                    slippage = -slippage  # For sells, negative slippage is adverse
                 slippages.append(slippage)
                 
         avg_slippage = np.mean(slippages) if slippages else 0.0
@@ -282,6 +291,7 @@ class AdvancedBroker(SimulatedBroker):
             # Create partial fill (50-90% of original quantity)
             fill_ratio = np.random.uniform(0.5, 0.9)
             partial_quantity = int(event.quantity * fill_ratio)
+            remaining_quantity = event.quantity - partial_quantity
             
             # Create partial order event
             partial_order = OrderEvent(
@@ -298,7 +308,16 @@ class AdvancedBroker(SimulatedBroker):
             fill_event = super().execute_order(partial_order)
             
             if fill_event:
-                self.logger.info(f"Partial fill: {partial_quantity}/{event.quantity} shares")
+                self.logger.info(f"Partial fill: {partial_quantity}/{event.quantity} shares, {remaining_quantity} remaining")
+                
+                # Store remaining quantity for potential future execution
+                # In a real implementation, this would be queued for later execution
+                if event.order_id:
+                    self.pending_orders[event.order_id] = {
+                        'original_order': event,
+                        'remaining_quantity': remaining_quantity,
+                        'partial_fills': [fill_event]
+                    }
                 
             return fill_event
         else:
