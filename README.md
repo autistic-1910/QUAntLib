@@ -313,6 +313,7 @@ black quantlib/
 4. Add tests for new functionality
 5. Ensure all tests pass
 6. Submit a pull request
+<<<<<<< HEAD
 
 ## Known Limitations and Issues
 
@@ -400,3 +401,5 @@ black quantlib/
 ## License
 
 MIT License
+=======
+>>>>>>> 71da495740df6d9caa791368d21d8f6ef2f8082b
